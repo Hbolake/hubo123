@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>舆情洞察</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <!-- 顶部栏已移除，根据需求去掉品牌头部 -->
+    <section class="hero" role="region" aria-label="页面标题与搜索">
+      <h1 class="hero-title">舆情<span class="highlight">一键分析</span>，掌握<span class="highlight">行业动态</span></h1>
+      <p class="hero-subtitle">探索与体验大模型驱动的舆情分析平台，轻松集成多维数据与智能分析工具，</p>
+      <p class="hero-subtitle">提供企业级稳定、高效、安全的技术支持，释放模型潜力，赋能舆情洞察与决策创新。</p>
+      <div class="hero-search">
+        <div class="input input-large" style="flex:1;">
+          <!-- 搜索图标 -->
+          <svg class="icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+            <path d="M20 20L17 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <label for="topic" class="sr-only">输入主题</label>
+          <input id="topic" placeholder="AI 大模型应用进展" aria-label="分析主题" />
+          <div class="input-actions">
+            <button id="go" class="btn btn-primary btn-in-input" aria-label="开始生成报告" aria-controls="report">开始生成</button>
+            <button id="saveCircle" class="btn-circle btn-in-input" aria-label="下载PDF" title="下载PDF" disabled>
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path d="M12 3v12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M8 11l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M5 21h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+    
+    <main class="app-main">
+      <section class="card">
+        <h3 class="card-title">报告</h3>
+        <div class="report-container">
+          <article id="report" class="report"></article>
+        </div>
+      </section>
+      <div class="tech-card card">
+        <h3 class="card-title">实时日志</h3>
+        <div class="progress" aria-label="进度">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div class="progress-text" id="progressText" aria-live="polite" role="status">准备就绪</div>
+        <div id="logs" class="log-list" role="log" aria-live="polite" aria-atomic="false"></div>
+      </div>
+    </main>
+    <script>
+      const logs = document.getElementById('logs');
+      const report = document.getElementById('report');
+      const noticeBox = document.getElementById('notice');
+      const noticeText = document.getElementById('noticeText');
+      const saveBtn = document.getElementById('saveCircle');
+      const topicInput = document.getElementById('topic');
+      const goBtn = document.getElementById('go');
+      const progressBar = document.getElementById('progressBar');
+      const progressText = document.getElementById('progressText');
+
+      let currentProgress = 0;
+      const setProgress = (pct, text, color) => {
+        currentProgress = Math.max(currentProgress, Math.min(100, pct));
+        progressBar.style.width = currentProgress + '%';
+        progressBar.style.background = color || 'linear-gradient(90deg, #4ade80, #22c55e)';
+        progressText.textContent = Math.round(currentProgress) + '% · ' + (text || '');
+      };
+
+      const ws = new WebSocket(`ws://${location.host}/ws/logs`);
+
+      ws.onmessage = (ev) => {
+        const msg = ev.data || '';
+        const item = document.createElement('div');
+        item.className = 'log-item';
+        const time = document.createElement('div');
+        time.className = 'log-time';
+        time.textContent = new Date().toLocaleTimeString();
+        const content = document.createElement('div');
+        content.className = 'log-msg';
+        content.textContent = msg;
+        item.appendChild(time);
+        item.appendChild(content);
+        logs.appendChild(item);
+        logs.scrollTop = logs.scrollHeight;
+        // 根据后端日志前缀更新进度
+        if (msg.includes('[系统] 日志流已连接')) {
+          setProgress(2, '已连接日志流');
+        }
+        if (msg.startsWith('[搜索] 开始：')) {
+          setProgress(10, '开始搜索…');
+        }
+        if (msg.startsWith('[LLM检索] 使用AiHubMix')) {
+          setProgress(15, '调用 LLM 联网检索…');
+        }
+        if (msg.startsWith('[LLM检索] chat/completions 超时')) {
+          setProgress(20, 'LLM 检索重试中…');
+        }
+        if (msg.startsWith('[LLM检索] chat/completions 命中')) {
+          setProgress(30, 'LLM 检索成功');
+        }
+        if (msg.startsWith('[搜索] 命中 ')) {
+          setProgress(40, '已命中结果，准备抓取正文…');
+        }
+        if (msg.startsWith('[抓取] 已提取正文')) {
+          setProgress(65, '正文抓取完成');
+        }
+        if (msg.startsWith('[LLM] 请求豆包模型生成报告…')) {
+          setProgress(80, 'LLM 正在生成报告…');
+        }
+        if (msg.startsWith('[报告] 已生成Markdown')) {
+          setProgress(90, '报告已生成，准备导出 PDF…');
+        }
+        if (msg.startsWith('[PDF] 导出成功')) {
+          setProgress(100, '完成');
+        }
+        if (msg.includes('失败') || msg.includes('错误') || msg.includes('Ratelimit')) {
+          setProgress(currentProgress, '出现错误或限流，请稍后重试', 'linear-gradient(90deg, #fca5a5, #ef4444)');
+        }
+      }
+
+      // 已移除工具条幽灵按钮
+
+      goBtn.onclick = async () => {
+        const topic = topicInput.value.trim();
+        if (!topic) { alert('请输入主题'); return; }
+        report.textContent = '';
+        saveBtn.disabled = true;
+        saveBtn.setAttribute('aria-disabled','true');
+        // 在进度条处展示百分比即可，无需顶部小圆圈
+        setProgress(5, '准备开始…');
+        try {
+          const resp = await fetch('/analyze', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ topic })
+          });
+          if (!resp.ok) {
+            throw new Error('HTTP ' + resp.status);
+          }
+          const data = await resp.json();
+          if (data.error) { alert('生成失败: ' + (data.detail || data.error)); return; }
+          // 使用服务端返回的 HTML 片段渲染报告，保证与PDF样式一致
+          report.innerHTML = data.html || '';
+          if (data.notice) {
+            // 将提示信息作为一条日志发送
+            const msg = `[提示] ${data.notice}`;
+            const item = document.createElement('div');
+            item.className = 'log-item';
+            const time = document.createElement('div');
+            time.className = 'log-time';
+            time.textContent = new Date().toLocaleTimeString();
+            const content = document.createElement('div');
+            content.className = 'log-msg';
+            content.textContent = msg;
+            item.appendChild(time);
+            item.appendChild(content);
+            logs.appendChild(item);
+            logs.scrollTop = logs.scrollHeight;
+          }
+          saveBtn.disabled = false;
+          saveBtn.setAttribute('aria-disabled','false');
+          setProgress(100, '完成');
+          saveBtn.onclick = () => {
+            const url = '/download/pdf?path=' + encodeURIComponent(data.pdf_path);
+            window.open(url, '_blank');
+          }
+        } catch (err) {
+          alert('生成失败：' + err.message + '（可能是搜索限流或网络问题）');
+          setProgress(currentProgress, '失败或限流，请稍后重试', 'linear-gradient(90deg, #fca5a5, #ef4444)');
+        }
+        // 生成流程结束
+      }
+    </script>
+  </body>
+</html>
